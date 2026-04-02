@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Meeting {
+  id           String   @id @default(cuid())
+  title        String
+  fileName     String
+  fileUrl      String
+  duration     Int?
+  status       String   @default("uploaded") // uploaded | transcribing | summarizing | complete | error
+  errorMessage String?
+  transcript   String?
+  summary      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  actionItems ActionItem[]
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+}
+
+model ActionItem {
+  id        String  @id @default(cuid())
+  content   String
+  assignee  String?
+  completed Boolean @default(false)
+
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([meetingId])
+}
+
+model ProviderSettings {
+  id String @id @default("singleton")
+
+  transcriptionProvider String  @default("whisper-api")
+  transcriptionApiKey   String?
+  transcriptionModel    String?
+  transcriptionBaseUrl  String?
+
+  llmProvider String  @default("openai")
+  llmApiKey   String?
+  llmModel    String?
+  llmBaseUrl  String?
+
+  updatedAt DateTime @updatedAt
+}

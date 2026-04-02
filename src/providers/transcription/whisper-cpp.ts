@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
-import { access, readFile, unlink, mkdtemp } from "fs/promises";
-import { join } from "path";
+import { access, readFile, unlink, mkdtemp, readdir } from "fs/promises";
+import { join, basename } from "path";
 import { homedir, tmpdir } from "os";
 import type {
   TranscriptionProvider,
@@ -40,7 +40,6 @@ export class WhisperCppProvider implements TranscriptionProvider {
             )
           );
         } else {
-          // --help returns non-zero exit code, but that's fine — binary exists
           resolve();
         }
       });
@@ -71,16 +70,22 @@ export class WhisperCppProvider implements TranscriptionProvider {
     await this.ensureModelExists();
 
     const modelPath = this.getModelPath();
-
-    // Create a temp directory for whisper output
     const tempDir = await mkdtemp(join(tmpdir(), "meetscribe-"));
     const outputBase = join(tempDir, "output");
 
+    // whisper.cpp only reads WAV natively — convert other formats via ffmpeg
+    const ext = filePath.split(".").pop()?.toLowerCase();
+    let audioPath = filePath;
+    if (ext !== "wav") {
+      audioPath = join(tempDir, "input.wav");
+      await this.convertToWav(filePath, audioPath);
+    }
+
     const args = [
       "-m", modelPath,
-      "-f", filePath,
+      "-f", audioPath,
       "-oj",                  // output JSON
-      "-of", outputBase,      // output file base name (whisper adds .json)
+      "-of", outputBase,      // output file base name
       "--no-prints",          // suppress progress to stderr
     ];
 
@@ -89,23 +94,32 @@ export class WhisperCppProvider implements TranscriptionProvider {
     }
 
     try {
-      await this.runWhisper(args);
+      const stdout = await this.runWhisper(args);
 
-      // whisper.cpp writes output.json
-      const jsonPath = `${outputBase}.json`;
-      const raw = await readFile(jsonPath, "utf-8");
-      const data = JSON.parse(raw);
+      // Strategy 1: Look for output.json at the expected path
+      // Strategy 2: Look for any .json file in the temp dir (some versions name differently)
+      // Strategy 3: Parse stdout as JSON (some versions print JSON to stdout)
+      // Strategy 4: Use plain text output as fallback
 
-      // Clean up temp files
-      await unlink(jsonPath).catch(() => {});
+      const jsonData = await this.findAndReadJsonOutput(tempDir, outputBase, stdout, filePath);
 
-      return this.parseOutput(data);
+      if (jsonData) {
+        return this.parseJsonOutput(jsonData);
+      }
+
+      // Strategy 4: Look for .txt output or use stdout as plain text
+      const textResult = await this.findTextOutput(tempDir, outputBase, stdout);
+      if (textResult) {
+        return { text: textResult };
+      }
+
+      throw new Error(
+        "whisper.cpp ran but produced no output. " +
+          "Try running whisper-cli manually to check: " +
+          `whisper-cli -m ${modelPath} -f "${filePath}" -oj`
+      );
     } catch (error) {
-      // Clean up on error too
-      await unlink(`${outputBase}.json`).catch(() => {});
-
       if (error instanceof Error) {
-        // Detect common failure modes
         if (error.message.includes("SIGKILL") || error.message.includes("signal: 9")) {
           throw new Error(
             `Whisper process was killed (likely out of memory). ` +
@@ -127,7 +141,143 @@ export class WhisperCppProvider implements TranscriptionProvider {
         }
       }
       throw error;
+    } finally {
+      // Clean up all temp files
+      try {
+        const files = await readdir(tempDir);
+        for (const f of files) {
+          await unlink(join(tempDir, f)).catch(() => {});
+        }
+      } catch {
+        // temp dir cleanup is best-effort
+      }
     }
+  }
+
+  private convertToWav(inputPath: string, outputPath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      execFile(
+        "ffmpeg",
+        [
+          "-i", inputPath,
+          "-ar", "16000",     // 16kHz sample rate (what Whisper expects)
+          "-ac", "1",         // mono
+          "-c:a", "pcm_s16le", // 16-bit PCM WAV
+          "-y",               // overwrite output
+          outputPath,
+        ],
+        { timeout: 5 * 60 * 1000 }, // 5 min timeout for conversion
+        (error, _stdout, stderr) => {
+          if (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+              reject(
+                new Error(
+                  "ffmpeg not found. It is required to process non-WAV audio files.\n" +
+                    "Install it with: brew install ffmpeg"
+                )
+              );
+            } else {
+              reject(
+                new Error(`ffmpeg conversion failed: ${stderr || error.message}`)
+              );
+            }
+          } else {
+            resolve();
+          }
+        }
+      );
+    });
+  }
+
+  private async findAndReadJsonOutput(
+    tempDir: string,
+    outputBase: string,
+    stdout: string,
+    filePath: string
+  ): Promise<unknown | null> {
+    // Try exact expected path first
+    const expectedPath = `${outputBase}.json`;
+    try {
+      const raw = await readFile(expectedPath, "utf-8");
+      return JSON.parse(raw);
+    } catch {
+      // Not at expected path
+    }
+
+    // Search temp dir for any .json file whisper might have created
+    try {
+      const files = await readdir(tempDir);
+      const jsonFile = files.find((f) => f.endsWith(".json"));
+      if (jsonFile) {
+        const raw = await readFile(join(tempDir, jsonFile), "utf-8");
+        return JSON.parse(raw);
+      }
+    } catch {
+      // No json files found
+    }
+
+    // Some versions write JSON next to the input file instead of the -of path
+    const inputJsonPath = filePath.replace(/\.[^.]+$/, ".json");
+    try {
+      const raw = await readFile(inputJsonPath, "utf-8");
+      const data = JSON.parse(raw);
+      // Clean up — we don't want to leave .json files next to uploads
+      await unlink(inputJsonPath).catch(() => {});
+      return data;
+    } catch {
+      // Not next to input file either
+    }
+
+    // Try parsing stdout as JSON
+    const trimmedStdout = stdout.trim();
+    if (trimmedStdout.startsWith("{") || trimmedStdout.startsWith("[")) {
+      try {
+        return JSON.parse(trimmedStdout);
+      } catch {
+        // stdout isn't JSON
+      }
+    }
+
+    return null;
+  }
+
+  private async findTextOutput(
+    tempDir: string,
+    outputBase: string,
+    stdout: string
+  ): Promise<string | null> {
+    // Check for .txt file in temp dir
+    const expectedTxt = `${outputBase}.txt`;
+    try {
+      const raw = await readFile(expectedTxt, "utf-8");
+      if (raw.trim()) return raw.trim();
+    } catch {
+      // no txt file
+    }
+
+    // Search temp dir for any .txt file
+    try {
+      const files = await readdir(tempDir);
+      const txtFile = files.find((f) => f.endsWith(".txt"));
+      if (txtFile) {
+        const raw = await readFile(join(tempDir, txtFile), "utf-8");
+        if (raw.trim()) return raw.trim();
+      }
+    } catch {
+      // no txt files
+    }
+
+    // Use stdout if it has meaningful text content
+    const trimmed = stdout.trim();
+    if (trimmed.length > 20 && !trimmed.startsWith("{")) {
+      // Strip whisper.cpp timing markers like [00:00:00.000 --> 00:00:05.000]
+      const cleaned = trimmed
+        .replace(/\[\d{2}:\d{2}:\d{2}\.\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}\.\d{3}\]\s*/g, "")
+        .trim();
+      if (cleaned) return cleaned;
+    }
+
+    return null;
   }
 
   private runWhisper(args: string[]): Promise<string> {
@@ -155,9 +305,7 @@ export class WhisperCppProvider implements TranscriptionProvider {
     });
   }
 
-  private parseOutput(data: unknown): TranscriptionResult {
-    // whisper.cpp JSON format can vary by version.
-    // Handle both common structures defensively.
+  private parseJsonOutput(data: unknown): TranscriptionResult {
     let text = "";
     let duration: number | undefined;
 
@@ -173,7 +321,6 @@ export class WhisperCppProvider implements TranscriptionProvider {
           .filter(Boolean)
           .join(" ");
 
-        // Get duration from last segment's timestamp
         const lastSeg = obj.transcription[obj.transcription.length - 1] as
           | Record<string, unknown>
           | undefined;
@@ -211,11 +358,16 @@ export class WhisperCppProvider implements TranscriptionProvider {
           .filter(Boolean)
           .join(" ");
       }
+
+      // Format 4: top-level text field
+      if (!text && typeof obj.text === "string") {
+        text = obj.text.trim();
+      }
     }
 
     if (!text) {
       throw new Error(
-        "Could not parse whisper.cpp output. The JSON format may have changed."
+        "Could not parse whisper.cpp JSON output. The format may have changed."
       );
     }
 
@@ -224,7 +376,6 @@ export class WhisperCppProvider implements TranscriptionProvider {
 
   private parseTimestamp(ts: string | undefined): number | undefined {
     if (!ts) return undefined;
-    // Format: "HH:MM:SS.mmm" or "MM:SS.mmm"
     const parts = ts.split(":");
     if (parts.length === 3) {
       const hours = parseInt(parts[0], 10);

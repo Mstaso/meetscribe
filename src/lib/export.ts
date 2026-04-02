@@ -1,6 +1,6 @@
 import type { Meeting, ActionItem } from "@/generated/prisma/client";
 
-export function generateMarkdownExport(
+export function generateTextExport(
   meeting: Meeting & { actionItems: ActionItem[] }
 ): string {
   const date = meeting.createdAt.toLocaleDateString("en-US", {
@@ -14,28 +14,29 @@ export function generateMarkdownExport(
     ? `${Math.floor(meeting.duration / 60)}m ${meeting.duration % 60}s`
     : "Unknown";
 
-  let md = `# ${meeting.title}\n\n`;
-  md += `**Date:** ${date}  \n`;
-  md += `**Duration:** ${duration}  \n`;
-  md += `**Source file:** ${meeting.fileName}\n\n`;
+  let txt = `${meeting.title}\n`;
+  txt += `${"=".repeat(meeting.title.length)}\n\n`;
+  txt += `Date: ${date}\n`;
+  txt += `Duration: ${duration}\n`;
+  txt += `Source file: ${meeting.fileName}\n\n`;
 
   if (meeting.summary) {
-    md += `## Summary\n\n${meeting.summary}\n\n`;
+    txt += `SUMMARY\n-------\n${meeting.summary}\n\n`;
   }
 
   if (meeting.actionItems.length > 0) {
-    md += `## Action Items\n\n`;
+    txt += `ACTION ITEMS\n------------\n`;
     for (const item of meeting.actionItems) {
-      const checkbox = item.completed ? "[x]" : "[ ]";
-      const assignee = item.assignee ? ` _(${item.assignee})_` : "";
-      md += `- ${checkbox} ${item.content}${assignee}\n`;
+      const check = item.completed ? "[x]" : "[ ]";
+      const assignee = item.assignee ? ` (${item.assignee})` : "";
+      txt += `${check} ${item.content}${assignee}\n`;
     }
-    md += "\n";
+    txt += "\n";
   }
 
   if (meeting.transcript) {
-    md += `## Transcript\n\n${meeting.transcript}\n`;
+    txt += `TRANSCRIPT\n----------\n${meeting.transcript}\n`;
   }
 
-  return md;
+  return txt;
 }

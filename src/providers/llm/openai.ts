@@ -9,8 +9,12 @@ export class OpenAILLMProvider implements LLMProvider {
   private baseUrl: string;
 
   constructor(config: LLMProviderConfig) {
-    if (!config.apiKey) throw new Error("OpenAI API key is required");
-    this.apiKey = config.apiKey;
+    // API key is required for OpenAI's API, but optional for
+    // self-hosted/company endpoints that use the same format
+    if (!config.apiKey && !config.baseUrl) {
+      throw new Error("OpenAI API key is required (or set a custom Base URL for keyless endpoints)");
+    }
+    this.apiKey = config.apiKey ?? "";
     this.model = config.model ?? "gpt-oss";
     this.baseUrl = config.baseUrl ?? "https://api.openai.com/v1";
   }
@@ -20,12 +24,16 @@ export class OpenAILLMProvider implements LLMProvider {
     userPrompt: string,
     options?: { temperature?: number; maxTokens?: number }
   ): Promise<LLMResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
+      headers,
       body: JSON.stringify({
         model: this.model,
         messages: [

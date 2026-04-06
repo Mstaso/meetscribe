@@ -10,7 +10,7 @@ export async function GET(
 
   const meeting = await db.meeting.findUnique({
     where: { id },
-    include: { actionItems: true },
+    include: { actionItems: true, decisions: true, openQuestions: true },
   });
 
   if (!meeting) {

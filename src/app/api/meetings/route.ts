@@ -4,7 +4,7 @@ import { db } from "@/server/db";
 export async function GET() {
   const meetings = await db.meeting.findMany({
     orderBy: { createdAt: "desc" },
-    include: { actionItems: true },
+    include: { actionItems: true, decisions: true, openQuestions: true },
   });
   return NextResponse.json(meetings);
 }

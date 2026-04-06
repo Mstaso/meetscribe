@@ -31,7 +31,23 @@ interface ActionItem {
   id: string;
   content: string;
   assignee: string | null;
+  priority: string | null;
+  dueDate: string | null;
   completed: boolean;
+}
+
+interface Decision {
+  id: string;
+  content: string;
+  rationale: string | null;
+  decisionMakers: string | null;
+}
+
+interface OpenQuestion {
+  id: string;
+  question: string;
+  context: string | null;
+  owner: string | null;
 }
 
 interface Meeting {
@@ -45,6 +61,8 @@ interface Meeting {
   summary: string | null;
   createdAt: string;
   actionItems: ActionItem[];
+  decisions: Decision[];
+  openQuestions: OpenQuestion[];
 }
 
 const statusLabels: Record<string, string> = {
@@ -236,6 +254,8 @@ export default function MeetingDetailPage() {
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
             <Tab label="Summary" />
             <Tab label={`Action Items (${meeting.actionItems.length})`} />
+            <Tab label={`Decisions (${meeting.decisions.length})`} />
+            <Tab label={`Open Questions (${meeting.openQuestions.length})`} />
             <Tab label="Transcript" />
           </Tabs>
 
@@ -263,28 +283,52 @@ export default function MeetingDetailPage() {
                   </Typography>
                 ) : (
                   <List disablePadding>
-                    {meeting.actionItems.map((item) => (
-                      <ListItem key={item.id} disablePadding>
-                        <ListItemButton onClick={() => toggleActionItem(item)} dense>
-                          <ListItemIcon>
-                            <Checkbox
-                              edge="start"
-                              checked={item.completed}
-                              tabIndex={-1}
-                              disableRipple
+                    {meeting.actionItems.map((item) => {
+                      const secondaryParts: string[] = [];
+                      if (item.assignee) secondaryParts.push(`Assigned to: ${item.assignee}`);
+                      if (item.priority) secondaryParts.push(`Priority: ${item.priority}`);
+                      if (item.dueDate) secondaryParts.push(`Due: ${item.dueDate}`);
+                      const secondary = secondaryParts.length > 0 ? secondaryParts.join(" · ") : null;
+
+                      return (
+                        <ListItem
+                          key={item.id}
+                          disablePadding
+                          secondaryAction={
+                            item.priority ? (
+                              <Chip
+                                label={item.priority.toUpperCase()}
+                                size="small"
+                                color={
+                                  item.priority === "high" ? "error" :
+                                  item.priority === "medium" ? "warning" : "default"
+                                }
+                                variant="outlined"
+                              />
+                            ) : undefined
+                          }
+                        >
+                          <ListItemButton onClick={() => toggleActionItem(item)} dense>
+                            <ListItemIcon>
+                              <Checkbox
+                                edge="start"
+                                checked={item.completed}
+                                tabIndex={-1}
+                                disableRipple
+                              />
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={item.content}
+                              secondary={secondary}
+                              sx={{
+                                textDecoration: item.completed ? "line-through" : "none",
+                                color: item.completed ? "text.secondary" : "text.primary",
+                              }}
                             />
-                          </ListItemIcon>
-                          <ListItemText
-                            primary={item.content}
-                            secondary={item.assignee ? `Assigned to: ${item.assignee}` : null}
-                            sx={{
-                              textDecoration: item.completed ? "line-through" : "none",
-                              color: item.completed ? "text.secondary" : "text.primary",
-                            }}
-                          />
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
+                          </ListItemButton>
+                        </ListItem>
+                      );
+                    })}
                   </List>
                 )}
               </CardContent>
@@ -292,6 +336,66 @@ export default function MeetingDetailPage() {
           )}
 
           {tab === 2 && (
+            <Card>
+              <CardContent>
+                {meeting.decisions.length === 0 ? (
+                  <Typography color="text.secondary">
+                    No key decisions were identified in this meeting.
+                  </Typography>
+                ) : (
+                  <List disablePadding>
+                    {meeting.decisions.map((item) => {
+                      const secondaryParts: string[] = [];
+                      if (item.rationale) secondaryParts.push(item.rationale);
+                      if (item.decisionMakers) secondaryParts.push(`Decided by: ${item.decisionMakers}`);
+                      const secondary = secondaryParts.length > 0 ? secondaryParts.join(" · ") : null;
+
+                      return (
+                        <ListItem key={item.id}>
+                          <ListItemText
+                            primary={item.content}
+                            secondary={secondary}
+                          />
+                        </ListItem>
+                      );
+                    })}
+                  </List>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === 3 && (
+            <Card>
+              <CardContent>
+                {meeting.openQuestions.length === 0 ? (
+                  <Typography color="text.secondary">
+                    No open questions were identified in this meeting.
+                  </Typography>
+                ) : (
+                  <List disablePadding>
+                    {meeting.openQuestions.map((item) => {
+                      const secondaryParts: string[] = [];
+                      if (item.context) secondaryParts.push(item.context);
+                      if (item.owner) secondaryParts.push(`Owner: ${item.owner}`);
+                      const secondary = secondaryParts.length > 0 ? secondaryParts.join(" · ") : null;
+
+                      return (
+                        <ListItem key={item.id}>
+                          <ListItemText
+                            primary={item.question}
+                            secondary={secondary}
+                          />
+                        </ListItem>
+                      );
+                    })}
+                  </List>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === 4 && (
             <Card>
               <CardContent>
                 <Typography

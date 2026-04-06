@@ -21,6 +21,8 @@ interface Meeting {
   duration: number | null;
   createdAt: string;
   actionItems: { id: string; completed: boolean }[];
+  decisions: { id: string }[];
+  openQuestions: { id: string }[];
 }
 
 const statusColors: Record<string, "default" | "info" | "warning" | "success" | "error"> = {
@@ -145,6 +147,16 @@ export default function Dashboard() {
                       {totalActions > 0 && (
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                           Action items: {completedActions}/{totalActions} done
+                        </Typography>
+                      )}
+                      {meeting.decisions.length > 0 && (
+                        <Typography variant="body2" color="text.secondary">
+                          Decisions: {meeting.decisions.length}
+                        </Typography>
+                      )}
+                      {meeting.openQuestions.length > 0 && (
+                        <Typography variant="body2" color="text.secondary">
+                          Open questions: {meeting.openQuestions.length}
                         </Typography>
                       )}
                     </CardContent>

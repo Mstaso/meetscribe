@@ -10,7 +10,7 @@ export async function GET(
   const { id } = await context.params;
   const meeting = await db.meeting.findUnique({
     where: { id },
-    include: { actionItems: true },
+    include: { actionItems: true, decisions: true, openQuestions: true },
   });
 
   if (!meeting) {
@@ -38,10 +38,15 @@ export async function PATCH(
 
   // Retry processing
   if (body.retry === true) {
-    await db.meeting.update({
-      where: { id },
-      data: { status: "uploaded", errorMessage: null },
-    });
+    await db.$transaction([
+      db.meeting.update({
+        where: { id },
+        data: { status: "uploaded", errorMessage: null, summary: null },
+      }),
+      db.actionItem.deleteMany({ where: { meetingId: id } }),
+      db.decision.deleteMany({ where: { meetingId: id } }),
+      db.openQuestion.deleteMany({ where: { meetingId: id } }),
+    ]);
     processMeeting(id).catch(console.error);
     return NextResponse.json({ status: "retrying" });
   }

@@ -1,7 +1,7 @@
-import type { Meeting, ActionItem } from "@/generated/prisma/client";
+import type { Meeting, ActionItem, Decision, OpenQuestion } from "@/generated/prisma/client";
 
 export function generateTextExport(
-  meeting: Meeting & { actionItems: ActionItem[] }
+  meeting: Meeting & { actionItems: ActionItem[]; decisions: Decision[]; openQuestions: OpenQuestion[] }
 ): string {
   const date = meeting.createdAt.toLocaleDateString("en-US", {
     weekday: "long",
@@ -29,7 +29,33 @@ export function generateTextExport(
     for (const item of meeting.actionItems) {
       const check = item.completed ? "[x]" : "[ ]";
       const assignee = item.assignee ? ` (${item.assignee})` : "";
-      txt += `${check} ${item.content}${assignee}\n`;
+      const priority = item.priority ? ` [${item.priority.toUpperCase()}]` : "";
+      const dueDate = item.dueDate ? ` [Due: ${item.dueDate}]` : "";
+      txt += `${check} ${item.content}${assignee}${priority}${dueDate}\n`;
+    }
+    txt += "\n";
+  }
+
+  if (meeting.decisions.length > 0) {
+    txt += `KEY DECISIONS\n-------------\n`;
+    for (const item of meeting.decisions) {
+      const makers = item.decisionMakers ? ` (decided by: ${item.decisionMakers})` : "";
+      txt += `- ${item.content}${makers}\n`;
+      if (item.rationale) {
+        txt += `  Rationale: ${item.rationale}\n`;
+      }
+    }
+    txt += "\n";
+  }
+
+  if (meeting.openQuestions.length > 0) {
+    txt += `OPEN QUESTIONS\n--------------\n`;
+    for (const item of meeting.openQuestions) {
+      const owner = item.owner ? ` (Owner: ${item.owner})` : "";
+      txt += `- ${item.question}${owner}\n`;
+      if (item.context) {
+        txt += `  Context: ${item.context}\n`;
+      }
     }
     txt += "\n";
   }

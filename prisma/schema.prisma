@@ -20,7 +20,9 @@ model Meeting {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  actionItems ActionItem[]
+  actionItems   ActionItem[]
+  decisions     Decision[]
+  openQuestions OpenQuestion[]
 
   @@index([status])
   @@index([createdAt(sort: Desc)])
@@ -30,7 +32,39 @@ model ActionItem {
   id        String  @id @default(cuid())
   content   String
   assignee  String?
+  priority  String?
+  dueDate   String?
   completed Boolean @default(false)
+
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([meetingId])
+}
+
+model Decision {
+  id             String  @id @default(cuid())
+  content        String
+  rationale      String?
+  decisionMakers String?
+
+  meetingId String
+  meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([meetingId])
+}
+
+model OpenQuestion {
+  id       String  @id @default(cuid())
+  question String
+  context  String?
+  owner    String?
 
   meetingId String
   meeting   Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)

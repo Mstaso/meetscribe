@@ -3,8 +3,15 @@ import {
   getActiveLLMProvider,
   getActiveTranscriptionProvider,
 } from "@/providers/get-active-providers";
-import { SUMMARY_SYSTEM_PROMPT, ACTION_ITEMS_SYSTEM_PROMPT } from "./prompts";
+import {
+  SUMMARY_SYSTEM_PROMPT,
+  ACTION_ITEMS_SYSTEM_PROMPT,
+  DECISIONS_SYSTEM_PROMPT,
+  OPEN_QUESTIONS_SYSTEM_PROMPT,
+} from "./prompts";
 import { parseActionItems } from "./parse-action-items";
+import { parseDecisions } from "./parse-decisions";
+import { parseOpenQuestions } from "./parse-open-questions";
 import type { LLMProvider } from "@/providers/llm/types";
 
 const MAX_RETRIES = 2;
@@ -67,7 +74,7 @@ export async function processMeeting(meetingId: string) {
       data: { transcript: result.text, duration: result.duration },
     });
 
-    // Step 2: Summarize
+    // Step 2: Summarize and extract
     await db.meeting.update({
       where: { id: meetingId },
       data: { status: "summarizing" },
@@ -76,7 +83,7 @@ export async function processMeeting(meetingId: string) {
     const llmProvider = await getActiveLLMProvider();
     const transcript = prepareTranscript(result.text);
 
-    // Run summary and action items sequentially for weaker models
+    // Run all LLM calls sequentially for weaker models
     // (parallel requests can overwhelm local models like Ollama)
     const summaryText = await llmWithRetry(
       llmProvider,
@@ -90,8 +97,22 @@ export async function processMeeting(meetingId: string) {
       transcript
     );
 
+    const decisionsText = await llmWithRetry(
+      llmProvider,
+      DECISIONS_SYSTEM_PROMPT,
+      transcript
+    );
+
+    const openQuestionsText = await llmWithRetry(
+      llmProvider,
+      OPEN_QUESTIONS_SYSTEM_PROMPT,
+      transcript
+    );
+
     // Robust parsing that handles all kinds of messy LLM output
     const actionItems = parseActionItems(actionsText);
+    const decisions = parseDecisions(decisionsText);
+    const openQuestions = parseOpenQuestions(openQuestionsText);
 
     // Step 3: Store results
     await db.$transaction([
@@ -104,6 +125,28 @@ export async function processMeeting(meetingId: string) {
           data: {
             content: item.content,
             assignee: item.assignee ?? null,
+            priority: item.priority ?? null,
+            dueDate: item.dueDate ?? null,
+            meetingId,
+          },
+        })
+      ),
+      ...decisions.map((item) =>
+        db.decision.create({
+          data: {
+            content: item.content,
+            rationale: item.rationale ?? null,
+            decisionMakers: item.decisionMakers ?? null,
+            meetingId,
+          },
+        })
+      ),
+      ...openQuestions.map((item) =>
+        db.openQuestion.create({
+          data: {
+            question: item.question,
+            context: item.context ?? null,
+            owner: item.owner ?? null,
             meetingId,
           },
         })

@@ -12,6 +12,8 @@
 interface ActionItem {
   content: string;
   assignee: string | null;
+  priority: string | null;
+  dueDate: string | null;
 }
 
 export function parseActionItems(raw: string): ActionItem[] {
@@ -59,7 +61,7 @@ export function parseActionItems(raw: string): ActionItem[] {
 
   // Strategy 6: If all else fails and there's meaningful text, treat the whole thing as one item
   if (trimmed.length > 5 && trimmed.length < 500) {
-    return [{ content: trimmed, assignee: null }];
+    return [{ content: trimmed, assignee: null, priority: null, dueDate: null }];
   }
 
   return [];
@@ -114,7 +116,21 @@ function normalizeItems(items: unknown[]): ActionItem[] {
         getString(item, "responsible") ||
         null;
 
-      return { content, assignee };
+      const priority = normalizePriority(
+        getString(item, "priority") ||
+        getString(item, "urgency") ||
+        getString(item, "importance") ||
+        null
+      );
+
+      const dueDate =
+        getString(item, "dueDate") ||
+        getString(item, "due_date") ||
+        getString(item, "due") ||
+        getString(item, "deadline") ||
+        null;
+
+      return { content, assignee, priority, dueDate };
     })
     .filter((item) => item.content.length > 0);
 }
@@ -146,5 +162,14 @@ function parseListLine(line: string): ActionItem | null {
   }
 
   if (!content) return null;
-  return { content, assignee };
+  return { content, assignee, priority: null, dueDate: null };
+}
+
+function normalizePriority(val: string | null): string | null {
+  if (!val) return null;
+  const lower = val.toLowerCase();
+  if (lower.includes("high")) return "high";
+  if (lower.includes("medium") || lower.includes("med")) return "medium";
+  if (lower.includes("low")) return "low";
+  return null;
 }
